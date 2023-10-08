@@ -54,7 +54,7 @@ class ParallelSynapseNeuron(nn.Module):
     single neuron with parallel synapse
     '''
 
-    def __init__(self, input_dim: int, n_synapse: int, output_dim: int, input_range: Tuple = (-1, 1)) -> None:
+    def __init__(self, input_dim: int, n_synapse: int, output_dim: int, input_range: Tuple = (-1.5, 1.5)) -> None:
         super().__init__()
 
         self.parallel_synapse = ParallelSynapse(
@@ -79,7 +79,7 @@ class ParallelSynapseNN1(nn.Module):
     be careful the input range for parallel synapse
     '''
 
-    def __init__(self, input_dim: int, n_synapse: int, hidden_dim: int, output_dim: int, input_range: Tuple = (-1, 1)) -> None:
+    def __init__(self, input_dim: int, n_synapse: int, hidden_dim: int, output_dim: int, input_range: Tuple = (0, 1)) -> None:
         super().__init__()
 
         self.fc1 = nn.Linear(input_dim, hidden_dim)
@@ -95,9 +95,10 @@ class ParallelSynapseNN1(nn.Module):
         Returns:
             output: (n_data, output_dim)
         '''
-        x = self.fc1(input)
+        x = self.fc1(input) 
+        x = torch.sigmoid(x)
+        
         x = self.parallel_synapse(x)
-        x = torch.relu(x)
         x = self.fc2(x)
         return F.log_softmax(x, dim = 1)
     
@@ -107,11 +108,11 @@ class ParallelSynapseNN2(nn.Module):
     be careful the input range for parallel synapse
     '''
 
-    def __init__(self, input_dim: int, n_synapse: int, hidden_dim: int, output_dim: int, input_range: Tuple = (-1, 1)) -> None:
+    def __init__(self, input_dim: int, n_synapse: int, hidden_dim: int, output_dim: int, input_range: Tuple = (-1.5, 1.5)) -> None:
         super().__init__()
 
-        self.parallel_synapse1 = ParallelSynapse(
-            input_dim, n_synapse, input_range)
+        self.parallel_synapse = ParallelSynapse(
+            input_dim, n_synapse, input_range = input_range)
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, output_dim)
         
@@ -123,9 +124,9 @@ class ParallelSynapseNN2(nn.Module):
         Returns:
             output: (n_data, output_dim)
         '''
-        x = self.parallel_synapse1(x)
+        x = self.parallel_synapse(input)
         x = self.fc1(x)
-        x = torch.relu(x)
+        x = torch.sigmoid(x)
         x = self.fc2(x)
         return F.log_softmax(x, dim = 1)
 
@@ -133,13 +134,11 @@ class TwoLayerNN(nn.Module):
     '''
     two layered neural network
     '''
-
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int) -> None:
         super().__init__()
 
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, output_dim)
-        
     
     def forward(self, input: Tensor):
         '''
@@ -150,7 +149,7 @@ class TwoLayerNN(nn.Module):
             output: (n_data, output_dim)
         '''
         x = self.fc1(input)
-        x = torch.relu(x)
+        x = torch.sigmoid(x)
         x = self.fc2(x)
         return F.log_softmax(x, dim = 1)
     
