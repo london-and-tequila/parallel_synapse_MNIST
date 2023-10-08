@@ -44,7 +44,7 @@ def train_models(seed,
         # '2-NN (H={:d})'.format(H):  TwoLayerNN(in_dim * in_dim, H, out_dim), \
         
         '2-NN with parallel synapse (M={:d}) at hidden layer (H={:d})'.format(M, H):  ParallelSynapseNN1(in_dim * in_dim, M, H, out_dim),\
-        '2-NN with parallel synapse (M={:d}) at input layer (H={:d})'.format(M, H):  ParallelSynapseNN2(in_dim * in_dim, M, H, out_dim)
+        # '2-NN with parallel synapase (M={:d}) at input layer (H={:d})'.format(M, H):  ParallelSynapseNN2(in_dim * in_dim, M, H, out_dim)
         }
     accuracies = {}
     losses = {}
@@ -64,16 +64,22 @@ def train_models(seed,
         model = models[model_name]
         # Initialize model, criterion, and optimizer 
         model.to(device)
-        optimizer = optim.Adam(model.parameters())
+        optimizer = optim.Adam(model.parameters(), lr=0.001)
         for epoch in range(num_epochs):
             # Training loop
             if 'parallel synapse' in model_name:
                 with torch.no_grad():
                     model.parallel_synapse.slope.data = torch.clamp(model.parallel_synapse.slope.data, min = 0)
                     model.parallel_synapse.ampli.data = torch.clamp(model.parallel_synapse.ampli.data, min = 0)
-                    model.parallel_synapse.thres.data = torch.clamp(model.parallel_synapse.thres.data, min = 0, max = 1)
+                    
+                    mask = ((model.parallel_synapse.thres.data < 0) + (model.parallel_synapse.thres.data > 1)).bool()
+                    model.parallel_synapse.thres.data[mask] = torch.rand(mask.sum())
+                    # model.parallel_synapse.thres.data = torch.clamp(model.parallel_synapse.thres.data, min = 0, max = 1)
+                    
+                    mask = model.parallel_synapse.ampli.data < 1e-3
+                    model.parallel_synapse.ampli.data[mask] = torch.rand(mask.sum()) 
                 
-            model.train()
+            model.train() 
             running_loss = 0.0
             for i, (inputs, labels) in enumerate(trainloader):
                 inputs = inputs.view(-1, 28*28).to(device)
