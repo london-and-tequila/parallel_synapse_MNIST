@@ -18,6 +18,42 @@ import pandas as pd
 from multiprocessing import Pool
 
 device = torch.device("cpu")
+
+def binary_labels(target: Tensor) -> Tensor:
+    '''
+    convert target to binary labels: 
+    (0, 1, 2, 3, 4) -> (0, 0, 0, 0, 0)
+    (5, 6, 7, 8, 9) -> (1, 1, 1, 1, 1)
+    '''
+    return (target > 4).long()
+
+def train_models_binary(seed,
+                        M = 3,  
+                        H = 20, 
+                        in_dim = 28, 
+                        out_dim = 1, 
+                        num_epochs = 20,
+                        verbose = True):
+    '''
+    train models for binary classification with MNIST dataset
+    
+    INPUTs:
+        seed: int,
+            manual seeds for initialization
+        M: int,
+            specifying number of parallel synapses
+        H: int,
+            specifying number of hidden units
+        num_epochs: int,
+            number of epochs for training
+            
+    OUTPUTs:
+    '''
+    torch.manual_seed(seed)
+    models = {
+        
+    }
+        
 def train_models(seed, 
                 M = 3,  
                 H = 20, 
@@ -41,7 +77,7 @@ def train_models(seed,
         # '1-NN':  SingleNeuron(in_dim * in_dim, out_dim), \
         # '1-NN with parallel synapse':  ParallelSynapseNeuron(in_dim * in_dim, M, out_dim), \
         
-        # '2-NN (H={:d})'.format(H):  TwoLayerNN(in_dim * in_dim, H, out_dim), \
+        '2-NN (H={:d})'.format(H):  TwoLayerNN(in_dim * in_dim, H, out_dim), \
         
         '2-NN with parallel synapse (M={:d}) at hidden layer (H={:d})'.format(M, H):  ParallelSynapseNN1(in_dim * in_dim, M, H, out_dim),\
         # '2-NN with parallel synapase (M={:d}) at input layer (H={:d})'.format(M, H):  ParallelSynapseNN2(in_dim * in_dim, M, H, out_dim)
@@ -70,14 +106,12 @@ def train_models(seed,
             if 'parallel synapse' in model_name:
                 with torch.no_grad():
                     model.parallel_synapse.slope.data = torch.clamp(model.parallel_synapse.slope.data, min = 0)
-                    model.parallel_synapse.ampli.data = torch.clamp(model.parallel_synapse.ampli.data, min = 0)
                     
-                    mask = ((model.parallel_synapse.thres.data < 0) + (model.parallel_synapse.thres.data > 1)).bool()
-                    model.parallel_synapse.thres.data[mask] = torch.rand(mask.sum())
-                    # model.parallel_synapse.thres.data = torch.clamp(model.parallel_synapse.thres.data, min = 0, max = 1)
+                    # mask = (model.parallel_synapse.ampli.data < 0.1) 
+                    model.parallel_synapse.ampli.data = torch.clamp(model.parallel_synapse.ampli.data, min = 0.1)
+                    # model.parallel_synapse.thres.data[mask] = torch.rand(mask.sum())
                     
-                    mask = model.parallel_synapse.ampli.data < 1e-3
-                    model.parallel_synapse.ampli.data[mask] = torch.rand(mask.sum()) 
+                    model.parallel_synapse.thres.data = torch.clamp(model.parallel_synapse.thres.data, min = 0, max = 1)
                 
             model.train() 
             running_loss = 0.0
@@ -124,10 +158,10 @@ if __name__ == '__main__':
     
     H = int(sys.argv[1])
     M = int(sys.argv[2])
-            
+    
     experiment = []
     for i in range(5):
-        result_dict = train_models(i, H=H,M=M, num_epochs = 51)
+        result_dict = train_models(i, H=H,M=M, num_epochs = 101)
         experiment.append(result_dict)
         # plot_result(result_dict)
 

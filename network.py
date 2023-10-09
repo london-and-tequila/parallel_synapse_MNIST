@@ -13,6 +13,21 @@ naming convention:
     input_dim: dimension of input
 '''
 
+def hingeLoss(actv: Tensor, 
+            theta: float, 
+            label: Tensor, 
+            margin = 0
+            ) -> Tensor:
+    '''
+    Inputs:
+        actv: (n_data, 1)
+        theta: scalar
+        label: (n_data, 1)
+        margin: scalar, default = 0
+    Outputs:
+        loss: scalar
+    '''
+    return (torch.maximum(torch.zeros_like(actv), margin - (actv - theta) * label)).sum()
 
 class ParallelSynapse(nn.Module):
     '''
@@ -27,7 +42,7 @@ class ParallelSynapse(nn.Module):
 
         self.thres = nn.Parameter(torch.rand(
             n_synapse, input_dim) * (input_range[1] - input_range[0]) + input_range[0])
-        self.slope = nn.Parameter(50* torch.rand(n_synapse, input_dim))
+        self.slope = nn.Parameter(10 * torch.rand(n_synapse, input_dim))
         self.ampli = nn.Parameter(torch.rand(n_synapse, input_dim))
 
     def forward(self, input: Tensor):
@@ -47,6 +62,7 @@ class ParallelSynapse(nn.Module):
             torch.tanh(x)
         x = x.sum(dim=1).squeeze(1)
         return x
+
 class ParallelSynapseLayer(nn.Module):
     def __init__(self, input_dim: int, n_synapse: int, output_dim: int, input_range: Tuple = (-1, 1)) -> None:
         super().__init__()
@@ -100,6 +116,8 @@ class ParallelSynapseNeuron(nn.Module):
         x = self.fc(x)
         return F.log_softmax(x, dim = 1)
 
+
+        
 class ParallelSynapseNN1(nn.Module):
     '''
     two layered neural network with parallel synapse at hidden layer
@@ -126,6 +144,22 @@ class ParallelSynapseNN1(nn.Module):
         
         x = self.parallel_synapse(x)
         return F.log_softmax(x, dim = 1)
+    
+class ParallelSynapseNN1_binary(ParallelSynapseNN1):
+    '''
+    trained to perform binary classification, using hinge loss
+    parallel synapses are in the hidden layer
+    '''
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        assert self.parallel_synapse.output_dim == 1
+        self.theta = nn.Parameter(torch.tensor(0.0))    
+            
+    def forward(self, input: Tensor):
+        x = self.fc1(input)
+        x = torch.sigmoid(x)
+        x = self.parallel_synapse(x)
+        return x - self.theta
     
 class ParallelSynapseNN2(nn.Module):
     '''

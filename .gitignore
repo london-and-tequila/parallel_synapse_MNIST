@@ -3,3 +3,4 @@ data/MNIST/raw/*
 main.ipynb
 data/MNIST_result.csv
 *pkl
+*png
