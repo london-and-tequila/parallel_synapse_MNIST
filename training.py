@@ -86,7 +86,7 @@ def train_models_binary(seed,
     assert out_dim == 1
     torch.manual_seed(seed)
     models = {
-        # '2-NN (H={:d})'.format(H):  TwoLayerNNBinary(in_dim * in_dim, H, out_dim), \
+        '2-NN (H={:d})'.format(H):  TwoLayerNNBinary(in_dim * in_dim, H, out_dim), \
         '2-NN with parallel synapse (M={:d}) at hidden layer (H={:d})'.format(M, H):  ParallelSynapseNN1Binary(in_dim * in_dim, M, H, out_dim)
     }
     accuracies = {}
@@ -284,7 +284,7 @@ if __name__ == '__main__':
     M = int(sys.argv[2])
     
     experiment = []
-    for i in range(1):
+    for i in range(5):
         result_dict = train_models_binary(i, H=H,M=M, num_epochs = 201)
         experiment.append(result_dict) 
 
