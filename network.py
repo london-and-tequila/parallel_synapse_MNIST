@@ -13,21 +13,6 @@ naming convention:
     input_dim: dimension of input
 '''
 
-def hingeLoss(actv: Tensor, 
-            theta: float, 
-            label: Tensor, 
-            margin = 0
-            ) -> Tensor:
-    '''
-    Inputs:
-        actv: (n_data, 1)
-        theta: scalar
-        label: (n_data, 1)
-        margin: scalar, default = 0
-    Outputs:
-        loss: scalar
-    '''
-    return (torch.maximum(torch.zeros_like(actv), margin - (actv - theta) * label)).sum()
 
 class ParallelSynapse(nn.Module):
     '''
@@ -86,9 +71,9 @@ class ParallelSynapseLayer(nn.Module):
         x = self.slope[None, :, :,:].expand(n_data, self.n_synapse, self.input_dim, self.output_dim) * \
             input[:, None, :, None].expand(n_data, self.n_synapse, self.input_dim, self.output_dim)
         x = x - self.thres[None, :,:,:].expand(n_data, self.n_synapse, self.input_dim, self.output_dim)
-        x = self.ampli[None, :, :,:].expand(n_data, self.n_synapse, self.input_dim, self.output_dim) * \
+        x = (self.ampli[None, :, :,:]**2).expand(n_data, self.n_synapse, self.input_dim, self.output_dim) * \
             torch.tanh(x)
-        x = x.sum(dim=(1,2)).squeeze()
+        x = x.sum(dim=(1,2)).squeeze() 
         return x
         
         
@@ -124,7 +109,7 @@ class ParallelSynapseNN1(nn.Module):
     be careful the input range for parallel synapse
     '''
 
-    def __init__(self, input_dim: int, n_synapse: int, hidden_dim: int, output_dim: int, input_range: Tuple = (0, 1)) -> None:
+    def __init__(self, input_dim: int, n_synapse: int, hidden_dim: int, output_dim: int, input_range: Tuple = (-0.5, 7.5)) -> None:
         super().__init__()
 
         self.fc1 = nn.Linear(input_dim, hidden_dim)
@@ -142,10 +127,11 @@ class ParallelSynapseNN1(nn.Module):
         x = self.fc1(input) 
         x = torch.sigmoid(x)
         
-        x = self.parallel_synapse(x)
+        x = self.parallel_synapse(x) 
+        
         return F.log_softmax(x, dim = 1)
     
-class ParallelSynapseNN1_binary(ParallelSynapseNN1):
+class ParallelSynapseNN1Binary(ParallelSynapseNN1):
     '''
     trained to perform binary classification, using hinge loss
     parallel synapses are in the hidden layer
@@ -153,13 +139,19 @@ class ParallelSynapseNN1_binary(ParallelSynapseNN1):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         assert self.parallel_synapse.output_dim == 1
+    
         self.theta = nn.Parameter(torch.tensor(0.0))    
-            
-    def forward(self, input: Tensor):
+        
+    def forward(self, 
+                input: Tensor, 
+                hidden: str = 'sigmoid'):
         x = self.fc1(input)
-        x = torch.sigmoid(x)
+        if hidden == 'sigmoid':
+            x = torch.sigmoid(x)
+        elif hidden == 'relu':
+            x = F.relu(x)
         x = self.parallel_synapse(x)
-        return x - self.theta
+        return (x - self.theta).squeeze()
     
 class ParallelSynapseNN2(nn.Module):
     '''
@@ -211,7 +203,24 @@ class TwoLayerNN(nn.Module):
         x = torch.sigmoid(x)
         x = self.fc2(x)
         return F.log_softmax(x, dim = 1)
-    
+class TwoLayerNNBinary(TwoLayerNN):
+    '''
+    two layered neural network
+    '''
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs) 
+        assert self.fc2.out_features == 1
+        self.theta = nn.Parameter(torch.tensor(0.0))
+        
+    def forward(self, input: Tensor, hidden = 'sigmoid'):
+        x = self.fc1(input)
+        if hidden == 'sigmoid':
+            x = torch.sigmoid(x)
+        elif hidden == 'relu':
+            x = F.relu(x) 
+        x = self.fc2(x)
+        
+        return (x - self.theta).squeeze()
 class SingleNeuron(nn.Module):
     '''
     single neuron
