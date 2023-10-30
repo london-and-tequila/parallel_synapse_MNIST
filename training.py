@@ -57,6 +57,7 @@ def train_models(model,
                 model_type: str = 'parallel',
                 loss_type: str = 'nll',
                 lr: float = 0.001): 
+    
     assert out_dim == 10
     
     params = {  
@@ -88,8 +89,10 @@ def train_models(model,
                     # model.parallel_synapse.thres.data = torch.clamp(model.parallel_synapse.thres.data, min = model.hidden_range[0] )
         
             inputs = inputs.view(-1, 28*28).to(device)
+            
             if loss_type == 'hinge':
                 labels = oneHotLabel(labels, out_dim)
+                
             labels = labels.to(device)
             optimizer.zero_grad()
             outputs = model(inputs) # default output: direct output from final layer
@@ -97,6 +100,7 @@ def train_models(model,
             if loss_type == 'nll':
                 outputs = F.log_softmax(outputs, dim = 1)
                 loss = F.nll_loss(outputs, labels) 
+                
             elif loss_type == 'hinge':
                 loss = multiHingeLoss(outputs, labels)
             

@@ -105,3 +105,5 @@ class ParallelSynapse2NN(nn.Module):
         x = self.parallel_synapse(x)
         
         return x
+
+ParallelSynapseLayer_FlipSign = ParallelSynapseLayer
