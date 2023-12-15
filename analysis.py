@@ -44,7 +44,7 @@ def plot_input_histogram_to_parallel_synapse_layer(model,
     hidden = []
     final = []
     for inputs, labels in testloader:
-        inputs = inputs.view(-1, 28*28)#.to(device)
+        inputs = inputs.view(-1, model.fc1.weight.shape[-1])#.to(device)
         
         if hidden_act == 'sigmoid':
             hidden.append(torch.sigmoid(model.fc1(inputs)).detach().cpu())
