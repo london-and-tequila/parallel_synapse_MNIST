@@ -224,7 +224,7 @@ if __name__ == '__main__':
     
     results = []
     if model_type == 'parallel':
-        file_name = './results_'+dataset+f'/{model_type}_{loss_type}_H{hidden_dim}_M{n_synapse}_bias{bias}_range{hidden_range[1]}_lr_thres{lr_thres}_lr_ampli{lr_ampli}_lr_slope{lr_slope}_scheduler{use_scheduler}_decrease_{decrease_epoch}_epoch_factor_{decrease_factor}_initialization_v2.pkl'  
+        file_name = './results_'+dataset+f'/{model_type}_{loss_type}_H{hidden_dim}_M{n_synapse}_bias{bias}_range{hidden_range[1]}_lr_thres{lr_thres}_lr_ampli{lr_ampli}_lr_slope{lr_slope}_scheduler{use_scheduler}_decrease_{decrease_epoch}_epoch_factor_{decrease_factor}_initialization_v4.pkl'  
     else:
         file_name = './results_'+dataset+f'/{model_type}_{loss_type}_H{hidden_dim}_scheduler{use_scheduler}_decrease_{decrease_epoch}_epoch_factor_{decrease_factor}.pkl'
     try:

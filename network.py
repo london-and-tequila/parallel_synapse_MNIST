@@ -59,8 +59,10 @@ class ParallelSynapseLayer(nn.Module):
         # self.thres = torch.abs(torch.normal(0, input_range[1] , size=(self.n_synapse, self.input_dim, self.output_dim)) )
         self.slope = nn.Parameter(5*torch.rand(self.n_synapse, self.input_dim, self.output_dim))
         self.ampli = nn.Parameter(torch.rand(self.n_synapse, self.input_dim, self.output_dim)) 
+        self.scaler = nn.Parameter(torch.rand(self.input_dim, self.output_dim) - 0.5*torch.ones(self.input_dim, self.output_dim))
+        
         # self.ampli = nn.Parameter(torch.ones(self.n_synapse, self.input_dim, self.output_dim) + 0.1*(torch.randn(self.n_synapse, self.input_dim, self.output_dim)))
-        self.scaler = nn.Parameter(torch.randint(0,2,(self.input_dim, self.output_dim))*2-torch.ones(self.input_dim, self.output_dim))
+        # self.scaler = nn.Parameter(torch.randint(0,2,(self.input_dim, self.output_dim))*2-torch.ones(self.input_dim, self.output_dim))
         self.bias = nn.Parameter(torch.rand(self.output_dim, ))
     def forward(self, input: Tensor):
         '''
