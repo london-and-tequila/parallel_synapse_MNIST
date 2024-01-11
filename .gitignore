@@ -1,6 +1,10 @@
+.vscode/
+__pycache__
 ./data/
 data/MNIST/raw/*
 main.ipynb
 data/MNIST_result.csv
 *pkl
 *png
+*pickle
+*pdf
