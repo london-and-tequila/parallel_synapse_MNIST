@@ -59,7 +59,7 @@ def plot_parallel_synapse_params(model) -> None:
     
 def plot_input_histogram_to_parallel_synapse_layer(model, 
                                                 testloader, 
-                                                hidden_act:str = 'sigmoid', 
+                                                hidden_act:str = 'relu', 
                                                 is_normalized = False,
                                                 file_name = '',
                                                 is_scaler = True,
@@ -67,21 +67,32 @@ def plot_input_histogram_to_parallel_synapse_layer(model,
     '''
     plot histograms of hidden layer input and final layer input 
     with histogram normalization
+    
+    also plot learned aggregate synaptic function for each hidden-output connection
+    grouped by output unit
+    
     Inputs:
         model: nn.Module
+        testloader: torch.utils.data.DataLoader
+        hidden_act: str, 'sigmoid' or 'relu', default: 'relu'
+        is_normalized: bool, whether to normalize input histogram
+        file_name: str, file name to save figure
+        is_scaler: bool, whether to multiply aggregate synaptic function with the magnitude of scaler, |c_{i,k}|
+        is_sign: bool, whether to multiply aggregate synaptic function with the sign of scaler, sgn(c_{i,k})
     '''
+    
+    # collection hidden layer input from test dataset
     hidden = []
     final = []
     for inputs, labels in testloader:
         inputs = inputs.view(-1, 28*28)#.to(device)
-        
         if hidden_act == 'sigmoid':
             hidden.append(torch.sigmoid(model.fc1(inputs)).detach().cpu())
-        else:
+        elif hidden_act == 'relu':
             hidden.append(torch.relu(model.fc1(inputs)).detach().cpu())
         final.append(model.parallel_synapse(hidden[-1]).detach().cpu())
         
-    hidden_thres = 1e-4
+    hidden_thres = 1e-4 # if hidden unit input is too small and close to zero, we ignore it
     hidden = torch.cat(hidden, dim=0)
     hidden = hidden.data.cpu().numpy() # n_data x n_hidden
     final = torch.cat(final, dim=0)
@@ -97,9 +108,13 @@ def plot_input_histogram_to_parallel_synapse_layer(model,
     for i in np.arange(hidden.shape[1]):
         tmp_hidden = hidden[:, i].ravel()
         hidden_list.append(tmp_hidden[tmp_hidden > hidden_thres])
+    
+    # for each hidden unit, we get its input range, and create input value with n_data bins
     input = torch.cat([torch.linspace(0, hidden_list[i].std()*4 + hidden_list[i].mean(), steps = n_data).reshape(-1, 1) for i in np.arange(hidden.shape[1])], dim = 1)
 
     all_freq = []
+    # also for get hidden unit input histogram, so that we can stretch the aggregate synaptic function 
+    # such that the x-axis is input percentile
     for i in np.arange(hidden.shape[1]):
         tmp_hidden = hidden[:, i].ravel()
         tmp_hidden = tmp_hidden[tmp_hidden > hidden_thres]
@@ -111,7 +126,7 @@ def plot_input_histogram_to_parallel_synapse_layer(model,
     n_data = input.shape[0]
     n_synapse = slope.shape[0]
     
-
+    # aggregate synaptic function
     x = slope[None, :, :, :].expand(n_data, n_synapse, input_dim, output_dim) \
         * (input[:, None, :, None].expand(n_data, n_synapse, input_dim, output_dim)
         - thres[None, :, :, :].expand(n_data, n_synapse, input_dim, output_dim))
@@ -124,8 +139,8 @@ def plot_input_histogram_to_parallel_synapse_layer(model,
     elif not is_scaler and not is_sign:
         x = x.detach().numpy()
     x = x.sum(axis=1).squeeze() # shape: n_data x input_dim x output_dim
-    # if is_normalized:
-    # scaled_input = freq * input[-1,:].numpy()[:, np.newaxis]
+    
+    
     if is_sign and is_scaler:
         plt.figure(figsize = (8, 7), dpi=300)
         for i in range(20):
@@ -138,6 +153,7 @@ def plot_input_histogram_to_parallel_synapse_layer(model,
         plt.savefig(file_name + '_hidden_activation.pdf')
     plt.show()
     
+    # aggregate synaptic function
     plt.figure(figsize = (7.5, 6), dpi=300)
     plt.rcParams.update({'font.size': 8})
     print('transmission function, scaler = ' + str(is_scaler) + ', sign = ' + str(is_sign))
