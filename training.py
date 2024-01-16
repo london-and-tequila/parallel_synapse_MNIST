@@ -159,7 +159,10 @@ def train_models(model,
             {'params': other_params}  # Default learning rate for the rest
         ]
     model.to(device)
+    
     optimizer = optim.Adam(param_groups, lr=lr)
+    
+    # learning rate scheduler
     if use_scheduler:
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer,  step_size=decrease_epoch, gamma=decrease_factor)
 
@@ -170,6 +173,10 @@ def train_models(model,
         running_loss = 0.0
         for i, (inputs, labels) in enumerate(trainloader):
             if model_type == 'parallel':
+                
+                # before training, clamp thresholds to be in the range of hidden_range, 
+                # and clamp slopes to be positive and at least 0.01
+                # also make smaller amplitudes to be 0.1
                 with torch.no_grad():
                     slope_thres = 0.01
                     mask = (model.parallel_synapse.slope.data < slope_thres) 
@@ -180,8 +187,6 @@ def train_models(model,
                     mask = (model.parallel_synapse.ampli.data**2 < ampli_thres) 
                     model.parallel_synapse.thres.data[mask] = (torch.rand(mask.sum()) * model.hidden_range[1] + model.hidden_range[0]).to(device)
                     model.parallel_synapse.ampli.data[mask] = np.sqrt(ampli_thres)
-                    
-                    # model.parallel_synapse.thres.data = torch.clamp(model.parallel_synapse.thres.data, min = model.hidden_range[0] )
         
             inputs = inputs.view(-1, input_dim).to(device)
             
@@ -192,6 +197,7 @@ def train_models(model,
             optimizer.zero_grad()
             outputs = model(inputs) # default output: direct output from final layer
             
+            # defin loss function
             if loss_type == 'nll':
                 outputs = F.log_softmax(outputs, dim = 1)
                 loss = F.nll_loss(outputs, labels) 
@@ -208,6 +214,8 @@ def train_models(model,
         
         
         losses.append(running_loss / len(trainloader))
+        
+        # calculate accuracy
         model.eval()
         correct, total = 0, 0
         with torch.no_grad():
@@ -236,6 +244,16 @@ def train_models(model,
 import sys
 
 if __name__ == '__main__':
+    '''
+    example usage:
+        python3 training.py 20 10 parallel nll 10 50 MNIST 0.05 0.001 0.001 True 50 0.1
+
+        train neural network with parallel synapse layer with 20 hidden neurons, 
+        10 synapses, set the additive bias as 10, set the threshold range as (0, 50),
+        the dataset is MNIST task, set the learning rate for thresholds as 0.05,  
+        learning rate for slopes as 0.001, learning rate for amplitudes as 0.001,
+        use learning rate scheduler with decrease_epoch = 50, decrease_factor = 0.1
+    '''
     
     hidden_dim = int(sys.argv[1])
     n_synapse = int(sys.argv[2])
@@ -256,18 +274,14 @@ if __name__ == '__main__':
     decrease_epoch = int(sys.argv[12])
     decrease_factor = float(sys.argv[13])
     assert model_type in ['parallel', '2nn']
-    assert loss_type in ['nll', 'hinge']
-    # dataset = 'MNIST'
-    # dataset = 'CIFAR10'
+    assert loss_type in ['nll', 'hinge'] 
     
     if dataset == 'MNIST':
         input_dim = 28*28
     elif dataset == 'CIFAR10':
         input_dim = 32*32*3
     
-    hidden_range = (0, range_upper) #if hidden_dim < 40 else (0, 20)
-    # bias = 10 if hidden_dim < 40 else 20
-    # bias = 0 if loss_type == 'hinge' else bias
+    hidden_range = (0, range_upper)  
     
     n_Seed = 20
     
@@ -312,6 +326,8 @@ if __name__ == '__main__':
             pickle.dump(results, f)
         
         train_loader, test_loader = get_loader(dataset)
+        
+        # train and save results
         results.append(train_models(model, 
                                     input_dim,
                             train_loader,
