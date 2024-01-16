@@ -14,11 +14,16 @@ import torchvision
 import torchvision.transforms as transforms
 import pickle
 import datetime
+
 device = torch.device("cpu")
 
 def get_loader(dataset: str) -> Tuple:
+    '''
+    create trainloader and testloader for MNIST or CIFAR10 dataset
+    '''
     # MNIST datasets
     if dataset == 'MNIST':
+        # preprocessing
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
         trainset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
         trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True)
@@ -27,6 +32,7 @@ def get_loader(dataset: str) -> Tuple:
         testloader = torch.utils.data.DataLoader(testset, batch_size=32, shuffle=False)
     # CIFAR10 datasets
     elif dataset == 'CIFAR10':
+        # preprocessing
         transform = transforms.Compose(
             [transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
@@ -42,6 +48,10 @@ def get_loader(dataset: str) -> Tuple:
 
 def multiHingeLoss(output, target, margin = 1):
     '''
+    convert multi-way classification to binary classification
+    for each class, treat it as positive class (+1) and the rest as negative class (-1)
+    compute hinge loss as (margin - output * target), where target is +1/-1
+    
     Inputs:
         output: (batch_size, num_classes), direct output from final layer output
         target: (batch_size, num_classes), must be +1/-1
@@ -54,6 +64,7 @@ def multiHingeLoss(output, target, margin = 1):
 
 def oneHotLabel(label, num_classes):
     '''
+    use digit label to generate one hot label
     Inputs:
         label: (batch_size, 1)
         num_classes: scalar
@@ -82,7 +93,49 @@ def train_models(model,
                 use_scheduler: bool = False,
                 decrease_epoch: int = 50,
                 decrease_factor: float = 0.1): 
+    '''
+    training process
     
+    Inputs:
+        model: nn.Module, model to be trained
+        
+        input_dim: int, input dimension, 28*28 for MNIST, 32*32*3 for CIFAR10
+        
+        trainloader: torch.utils.data.DataLoader, training data
+        
+        testloader: torch.utils.data.DataLoader, test data
+        
+        scaler_reg: float, regularization for scaler, default 0.0
+        
+        out_dim: int, output dimension, 10 for MNIST and CIFAR10
+        
+        num_epochs: int, number of epochs, default 201
+        
+        verbose: bool, print training process or not, default True
+        
+        device: torch.device, default cpu
+        
+        model_type: str, 'parallel' (with parallel synapse layer) or '2nn' (typical 2-layered neural network), default 'parallel'
+        
+        loss_type: str, 'nll' (negative log likelihood) or 'hinge' (multi-way hinge loss), default 'nll'
+        
+        lr: float, learning rate for all other parameters, default 0.001
+        
+        lr_thres: float, learning rate for thresholds, default 0.05
+        
+        lr_slope: float, learning rate for slopes, default 0.05
+        
+        lr_ampli: float, learning rate for amplitudes, default 0.05
+        
+        use_scheduler: bool, use learning rate scheduler or not, default False
+        
+        decrease_epoch: int, decrease learning rate every decrease_epoch epochs, default 50
+        
+        decrease_factor: float, decrease learning rate by decrease_factor, default 0.1
+        
+    Outputs:
+        results: dict, training results, including model, accuracy, loss, and parameters
+    '''
     assert out_dim == 10
     
     params = {  
