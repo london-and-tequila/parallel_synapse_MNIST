@@ -4,6 +4,31 @@ import matplotlib.pyplot as plt
 import numpy as np
 from training import *
 
+def get_acc(result) -> np.ndarray:
+    '''
+    return accuracy from training result
+    
+    Inputs:
+        result: dict, output from train_models_v3
+    Outputs:
+        acc: np.ndarray, accuracy
+    '''
+    acc = []
+    for i in range(len(result)):
+        acc.append(result[i]['accuracy'])
+    return np.array(acc)
+
+def get_loss(results):
+    '''
+    get loss from results dictionary
+    '''
+    loss = []
+    for result in results:
+        loss.append(result['loss'])
+        
+    return np.array(loss)
+
+
 def plot_parallel_synapse_params(model) -> None: 
     '''
     plot histograms of parallel synapses, such as amplitude, slope, threshold, scaler   
@@ -30,21 +55,25 @@ def plot_parallel_synapse_params(model) -> None:
     
     plt.tight_layout()
     plt.show()
-
+    
+    
 def plot_input_histogram_to_parallel_synapse_layer(model, 
                                                 testloader, 
                                                 hidden_act:str = 'sigmoid', 
-                                                is_normalized = False) -> None:
+                                                is_normalized = False,
+                                                file_name = '',
+                                                is_scaler = True,
+                                                is_sign = False) -> None:
     '''
-    plot histograms of hidden layer input and final layer input
-    
+    plot histograms of hidden layer input and final layer input 
+    with histogram normalization
     Inputs:
         model: nn.Module
     '''
     hidden = []
     final = []
     for inputs, labels in testloader:
-        inputs = inputs.view(-1, model.fc1.weight.shape[-1])#.to(device)
+        inputs = inputs.view(-1, 28*28)#.to(device)
         
         if hidden_act == 'sigmoid':
             hidden.append(torch.sigmoid(model.fc1(inputs)).detach().cpu())
@@ -54,16 +83,8 @@ def plot_input_histogram_to_parallel_synapse_layer(model,
         
     hidden_thres = 1e-4
     hidden = torch.cat(hidden, dim=0)
-    hidden = hidden.data.cpu().numpy()
+    hidden = hidden.data.cpu().numpy() # n_data x n_hidden
     final = torch.cat(final, dim=0)
-    plt.figure(figsize=(9, 3 ))
-    plt.subplot(1,3,1)
-    plt.hist(hidden[hidden>hidden_thres].flatten(), bins=100)
-    plt.title('Hidden activation, {:.1f}% > {:.2E}'.format((hidden>hidden_thres).mean() * 100, hidden_thres))
-    # plt.legend()
-    plt.xlabel('hidden layer input')
-    plt.ylabel('count')
-    
     f = model.parallel_synapse
     slope = f.slope
     ampli = f.ampli
@@ -71,8 +92,22 @@ def plot_input_histogram_to_parallel_synapse_layer(model,
     input_dim = slope.shape[1]
     n_data = 100
     output_dim = slope.shape[-1]
-    input = torch.cat([torch.linspace(0, hidden[:, i].std()*3 + hidden[:, i].mean(), steps = n_data).reshape(-1, 1) for i in range(hidden.shape[1])], dim = 1)
+    
+    hidden_list = [] 
+    for i in np.arange(hidden.shape[1]):
+        tmp_hidden = hidden[:, i].ravel()
+        hidden_list.append(tmp_hidden[tmp_hidden > hidden_thres])
+    input = torch.cat([torch.linspace(0, hidden_list[i].std()*4 + hidden_list[i].mean(), steps = n_data).reshape(-1, 1) for i in np.arange(hidden.shape[1])], dim = 1)
 
+    all_freq = []
+    for i in np.arange(hidden.shape[1]):
+        tmp_hidden = hidden[:, i].ravel()
+        tmp_hidden = tmp_hidden[tmp_hidden > hidden_thres]
+        freq, _ = np.histogram(tmp_hidden, bins=input[:,i].numpy())
+            
+        all_freq.append((freq/np.sum(freq)).cumsum())
+    freq = np.vstack(all_freq)
+    
     n_data = input.shape[0]
     n_synapse = slope.shape[0]
     
@@ -82,31 +117,73 @@ def plot_input_histogram_to_parallel_synapse_layer(model,
         - thres[None, :, :, :].expand(n_data, n_synapse, input_dim, output_dim))
     x = torch.tanh(x)
     x = x * (ampli[None, :, :, :]**2 ).expand(n_data, n_synapse, input_dim, output_dim)
-    # x = x * f.scaler[None, None, :, :].expand(n_data, n_synapse, input_dim, output_dim)
-    x = x.sum(dim=1).squeeze() 
+    if is_scaler and is_sign:
+        x = x.detach().numpy() * f.scaler[None, None, :, :].expand(n_data, n_synapse, input_dim, output_dim).detach().numpy()
+    elif is_scaler and not is_sign:
+        x = x.detach().numpy() * np.abs(f.scaler[None, None, :, :].expand(n_data, n_synapse, input_dim, output_dim).detach().numpy())
+    elif not is_scaler and not is_sign:
+        x = x.detach().numpy()
+    x = x.sum(axis=1).squeeze() # shape: n_data x input_dim x output_dim
     # if is_normalized:
-
-    #     input = input * hidden.max(dim = 0)
-    
-    plt.subplot(1,3,2)
-    plt.hist(final.data.cpu().numpy().flatten(), bins=100, label='MNIST')
-    ylim = plt.ylim()
-    plt.legend()
-    plt.xlabel('output')
-    plt.title('Histogram, final layer input')
-    
-    plt.tight_layout()
+    # scaled_input = freq * input[-1,:].numpy()[:, np.newaxis]
+    if is_sign and is_scaler:
+        plt.figure(figsize = (8, 7), dpi=300)
+        for i in range(20):
+            # hidden unit activation histogram
+            plt.subplot(4,5,i+1)
+            plt.hist(hidden_list[i], bins=input[:,i], density=True)
+            plt.title( 'Hidden unit ' +str(i+1))
+            plt.xlabel('Activation')
+        plt.tight_layout()
+        plt.savefig(file_name + '_hidden_activation.pdf')
     plt.show()
     
-    plt.figure(figsize = (10, 8))
-    
-    for i in range(min([20, input_dim])):
+    plt.figure(figsize = (7.5, 6), dpi=300)
+    plt.rcParams.update({'font.size': 8})
+    print('transmission function, scaler = ' + str(is_scaler) + ', sign = ' + str(is_sign))
+    for i in np.arange(min([20, output_dim])):
         plt.subplot(4,5,i+1)
-        plt.plot( torch.linspace(0, 1, steps=n_data), x.detach().numpy()[:,i,:], alpha = 0.8)
-        plt.title(str(i+1) + '-th hidden -> output')
-        plt.xlabel('Input')
+        plt.plot(freq.T * 100, x[:-1,:,i], linewidth = 1.,alpha = 0.8)# shape: n_data x input_dim x output_dim
+        plt.title(   'Output unit ' + str(i+1), fontsize=8)
+        plt.xlabel('Input (percentile)', fontsize=8)
     plt.tight_layout()
+    plt.savefig(file_name, bbox_inches='tight')
     plt.show()
+
+
+def plot_parallel_synapse_params(model) -> None: 
+    '''
+    plot histograms of parallel synapses, such as amplitude, slope, threshold, scaler   
+    
+    Inputs:
+        model: nn.Module
+    '''
+    plt.figure(figsize=(10, 2.5), dpi=300)
+    plt.subplot(1,4,1)
+    plt.hist((model.parallel_synapse.ampli.data.cpu().numpy()**2).flatten(), bins=20)
+    plt.xlabel('Amplitude')
+    plt.ylabel('Frequency')
+    
+
+    plt.subplot(1,4,2)
+    plt.hist(model.parallel_synapse.slope.data.cpu().numpy().flatten(), bins=20)
+    plt.xlabel('Slope')
+    plt.ylabel('Frequency')
+
+    plt.subplot(1,4,3)
+    plt.hist(model.parallel_synapse.thres.data.cpu().numpy().flatten(), bins=20)
+    plt.xlabel('Threshold')
+    plt.ylabel('Frequency')
+    
+    plt.subplot(1,4,4)
+    plt.hist(model.parallel_synapse.scaler.data.cpu().numpy().flatten(), bins=20)
+    plt.xlabel('Scaler')
+    plt.ylabel('Frequency')
+    
+    plt.tight_layout()
+    plt.savefig('./results_MNIST/parallel_synapse_params.pdf', bbox_inches='tight')
+    plt.show()
+    
     
 def plot_result(result) -> None:
     '''
@@ -129,31 +206,8 @@ def plot_result(result) -> None:
     plt.tight_layout()
     plt.show()
     
-def get_acc(result) -> np.ndarray:
-    '''
-    return accuracy from training result
     
-    Inputs:
-        result: dict, output from train_models_v3
-    Outputs:
-        acc: np.ndarray, accuracy
-    '''
-    acc = []
-    for i in range(len(result)):
-        acc.append(result[i]['accuracy'])
-    return np.array(acc)
-
-def get_hidden_final_activation_2NN(model, testloader) -> Tuple[np.ndarray, np.ndarray]:
-    '''
-    return hidden layer activation and final layer activation
-    
-    Inputs:
-        model: nn.Module
-        testloader: torch.utils.data.DataLoader
-    Outputs:
-        hidden: np.ndarray, hidden layer activation
-        final: np.ndarray, final layer activation
-    '''
+def get_hidden_final_activation_2NN(model, testloader):
     model.eval()
     hidden, final = [], []
     with torch.no_grad():
@@ -163,16 +217,8 @@ def get_hidden_final_activation_2NN(model, testloader) -> Tuple[np.ndarray, np.n
             final.append(model.fc2(torch.relu(model.fc1(inputs))).detach().cpu().numpy())
     return np.concatenate(hidden, axis=0), np.concatenate(final, axis=0)
 
-def plot_hidden_final_loss_2NN(model, hidden, final, result) -> None:
-    '''
-    plot hidden layer activation, final layer activation, loss, and accuracy, for 2NN
-    
-    Inputs:
-        model: nn.Module
-        hidden: np.ndarray, hidden layer activation
-        result: dict, output from train_models_v3
-    
-    '''
+def plot_hidden_final_loss_2NN(model, hidden, final, result):
+    # plot histogram of hidden activation
     plt.figure(figsize=(12, 3)) 
     plt.subplot(1,4,3)
     plt.hist(hidden[hidden>0.00001].flatten(), bins=100)
