@@ -91,7 +91,7 @@ class ParallelSynapseLayer(nn.Module):
         compute output of parallel synapse layer
         
         Inputs:
-            input: (n_data, input_dim) or (P, N), n_data is also as P in the paper
+            input: (n_data, input_dim) 
 
         Returns:
             output: (n_data, output_dim), or (P, K)

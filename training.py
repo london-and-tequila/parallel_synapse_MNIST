@@ -174,9 +174,9 @@ def train_models(model,
         for i, (inputs, labels) in enumerate(trainloader):
             if model_type == 'parallel':
                 
-                # before training, clamp thresholds to be in the range of hidden_range, 
+                # before training, resample thresholds to be in the range of hidden_range, 
                 # and clamp slopes to be positive and at least 0.01
-                # also make smaller amplitudes to be 0.1
+                # also make smaller amplitudes**2 to be 0.1
                 with torch.no_grad():
                     slope_thres = 0.01
                     mask = (model.parallel_synapse.slope.data < slope_thres) 

@@ -29,33 +29,7 @@ def get_loss(results):
     return np.array(loss)
 
 
-def plot_parallel_synapse_params(model) -> None: 
-    '''
-    plot histograms of parallel synapses, such as amplitude, slope, threshold, scaler   
-    
-    Inputs:
-        model: nn.Module
-    '''
-    plt.figure(figsize=(12, 3))
-    plt.subplot(1,4,1)
-    plt.hist((model.parallel_synapse.ampli.data.cpu().numpy()**2).flatten(), bins=20)
-    plt.title('Amplitude histogram')
-
-    plt.subplot(1,4,2)
-    plt.hist(model.parallel_synapse.slope.data.cpu().numpy().flatten(), bins=20)
-    plt.title('Slope histogram')
-
-    plt.subplot(1,4,3)
-    plt.hist(model.parallel_synapse.thres.data.cpu().numpy().flatten(), bins=20)
-    plt.title('Threshold histogram')
-    
-    plt.subplot(1,4,4)
-    plt.hist(model.parallel_synapse.scaler.data.cpu().numpy().flatten(), bins=20)
-    plt.title('Scaler histogram')
-    
-    plt.tight_layout()
-    plt.show()
-    
+ 
     
 def plot_input_histogram_to_parallel_synapse_layer(model, 
                                                 testloader, 
@@ -193,11 +167,11 @@ def plot_parallel_synapse_params(model) -> None:
     
     plt.subplot(1,4,4)
     plt.hist(model.parallel_synapse.scaler.data.cpu().numpy().flatten(), bins=20)
-    plt.xlabel('Scaler')
+    plt.xlabel('Scalar')
     plt.ylabel('Frequency')
     
     plt.tight_layout()
-    plt.savefig('./results_MNIST/parallel_synapse_params.pdf', bbox_inches='tight')
+    plt.savefig('./results/parallel_synapse_params.pdf', bbox_inches='tight')
     plt.show()
     
     
