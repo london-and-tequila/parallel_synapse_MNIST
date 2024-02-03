@@ -4,6 +4,7 @@ from typing import Any
 import torch
 from torch import Tensor
 from torch.nn.parameter import Parameter, UninitializedParameter
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.nn import functional as F
 from torch.nn import Module, init
 import torch.nn as nn
@@ -26,10 +27,10 @@ def get_loader(dataset: str) -> Tuple:
         # preprocessing
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
         trainset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
-        trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True)
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=256, shuffle=True)
 
         testset = torchvision.datasets.MNIST(root='./data', train=False, download=True, transform=transform)
-        testloader = torch.utils.data.DataLoader(testset, batch_size=32, shuffle=False)
+        testloader = torch.utils.data.DataLoader(testset, batch_size=256, shuffle=False)
     # CIFAR10 datasets
     elif dataset == 'CIFAR10':
         # preprocessing
@@ -75,13 +76,48 @@ def oneHotLabel(label, num_classes):
     one_hot_label =(-torch.ones(batch_size, num_classes)).scatter_(1, label.view(-1, 1), 1)
     return one_hot_label
 
+def get_threshold_pool(model, testloader, device = device):
+    '''
+    get thresholds for each neuron in the hidden layer
+    Inputs:
+        model: nn.Module, model to be trained
+        testloader: torch.utils.data.DataLoader, test data
+        device: torch.device, default cpu
+    Outputs:
+        threshold_pool: (2, hidden_dim), range of threshold for each neuron in the hidden layer
+    '''
+    hidden_actv = []
+    with torch.no_grad():
+        for inputs, labels in testloader:
+            inputs = inputs.view(-1, model.input_dim).to(device) 
+            hidden_actv.append(torch.relu( model.bn1(model.fc1(inputs)) + 2 ) .detach().cpu())
+    hidden_actv = np.concatenate(hidden_actv, axis = 0)  
+    sampled_threshold = np.zeros((model.n_synapse, model.hidden_dim, model.output_dim))
+    hidden_range = np.zeros((2, model.hidden_dim))
+    for i in range(model.hidden_dim):
+        # min_thres, max_thres = hidden_actv[:, i].min(), hidden_actv[:, i].max()
+        # use mean and std to estimate the range of threshold
+        hidden_actv_i = hidden_actv[:, i][hidden_actv[:, i] > 1e-4]
+        mean, std = hidden_actv_i.mean(), hidden_actv_i.std()
+        tmp_thres = np.random.normal(mean, std, (model.n_synapse, model.output_dim))
+        tmp_thres[tmp_thres < 0] = np.random.uniform(hidden_actv.min(), hidden_actv.max(), tmp_thres[tmp_thres < 0].shape)
+        sampled_threshold[:, i, :] = tmp_thres
+        # hidden_range[:, i] = hidden_actv.min(), hidden_actv.max()
+        hidden_range[:, i] = max(0,mean - 2.*std), mean + 2.*std
+    return torch.Tensor(sampled_threshold).to(device), hidden_range
+    '''
+    for M = 3, the best solution so far is 
+    tmp_thres = np.random.normal(mean, 0.5*std, (model.n_synapse, model.output_dim))
+    hidden_range[:, i] = max(0,mean - 2.5*std), mean + 2.5*std, 
+    clamp threshold at every epoch
+    '''
 def train_models(model, 
                 input_dim,
                 trainloader: torch.utils.data.DataLoader, 
                 testloader: torch.utils.data.DataLoader,
                 scaler_reg: float = 0.0, 
                 out_dim: int = 10, 
-                num_epochs: int = 201,
+                num_epochs: int = 801,
                 verbose: bool = True, 
                 device = device,
                 model_type: str = 'parallel',
@@ -90,6 +126,7 @@ def train_models(model,
                 lr_thres: float = 0.05,
                 lr_slope: float = 0.05,
                 lr_ampli: float = 0.05,
+                lr_scaler: float = 0.05,
                 use_scheduler: bool = False,
                 decrease_epoch: int = 50,
                 decrease_factor: float = 0.1): 
@@ -145,13 +182,14 @@ def train_models(model,
         'scaler_reg': scaler_reg
     }
     
-    special_params = {'parallel_synapse.thres', 'parallel_synapse.slope', 'parallel_synapse.ampli'}
+    special_params = {'parallel_synapse.thres', 'parallel_synapse.slope', 'parallel_synapse.ampli', 'parallel_synapse.scaler'}
     other_params = [param for param_name, param in model.named_parameters() if param_name not in special_params]
     if model_type == 'parallel':
         param_groups = [
             {'params': model.parallel_synapse.thres, 'lr': lr_thres},  
             {'params': model.parallel_synapse.slope, 'lr': lr_slope},
             {'params': model.parallel_synapse.ampli, 'lr': lr_ampli},
+            {'params': model.parallel_synapse.scaler, 'lr': lr_scaler},
             {'params': other_params}  # Default learning rate for the rest
         ]
     else:
@@ -165,29 +203,20 @@ def train_models(model,
     # learning rate scheduler
     if use_scheduler:
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer,  step_size=decrease_epoch, gamma=decrease_factor)
+        # scheduler = CosineAnnealingLR(optimizer, T_max = decrease_epoch, eta_min = decrease_factor * lr)
 
     losses, acc = [], []
     start = datetime.datetime.now()
     for epoch in range(num_epochs):
         model.train() 
         running_loss = 0.0
-        for i, (inputs, labels) in enumerate(trainloader):
-            if model_type == 'parallel':
+        # if model_type == 'parallel':
                 
-                # before training, resample thresholds to be in the range of hidden_range, 
-                # and clamp slopes to be positive and at least 0.01
-                # also make smaller amplitudes**2 to be 0.1
-                with torch.no_grad():
-                    slope_thres = 0.01
-                    mask = (model.parallel_synapse.slope.data < slope_thres) 
-                    model.parallel_synapse.slope.data = torch.clamp(model.parallel_synapse.slope.data, min = slope_thres)
-                    model.parallel_synapse.thres.data[mask] = (torch.rand(mask.sum()) * model.hidden_range[1] + model.hidden_range[0]).to(device)
-                    
-                    ampli_thres = 0.1
-                    mask = (model.parallel_synapse.ampli.data**2 < ampli_thres) 
-                    model.parallel_synapse.thres.data[mask] = (torch.rand(mask.sum()) * model.hidden_range[1] + model.hidden_range[0]).to(device)
-                    model.parallel_synapse.ampli.data[mask] = np.sqrt(ampli_thres)
-        
+            # before training, resample thresholds to be in the range of hidden_range, 
+            # and clamp slopes to be positive and at least 0.01
+            # also make smaller amplitudes**2 to be 0.1
+            
+        for i, (inputs, labels) in enumerate(trainloader):        
             inputs = inputs.view(-1, input_dim).to(device)
             
             if loss_type == 'hinge':
@@ -211,7 +240,49 @@ def train_models(model,
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
-        
+            # detect nan or inf in parameters:
+            with torch.no_grad():
+                if torch.isnan(model.fc1.weight.data).sum() > 0 or torch.isinf(model.fc1.weight.data).sum() > 0:
+                    print('nan or inf in fc1 weight')
+                if torch.isnan(model.fc1.bias.data).sum() > 0 or torch.isinf(model.fc1.bias.data).sum() > 0:
+                    print('nan or inf in fc1 bias')
+                if torch.isnan(model.parallel_synapse.thres.data).sum() > 0 or torch.isinf(model.parallel_synapse.thres.data).sum() > 0:
+                    print('nan or inf in parallel synapse thres')
+                if torch.isnan(model.parallel_synapse.slope.data).sum() > 0 or torch.isinf(model.parallel_synapse.slope.data).sum() > 0:
+                    print('nan or inf in parallel synapse slope')
+                if torch.isnan(model.parallel_synapse.ampli.data).sum() > 0 or torch.isinf(model.parallel_synapse.ampli.data).sum() > 0:
+                    print('nan or inf in parallel synapse ampli')
+                if torch.isnan(model.parallel_synapse.scaler.data).sum() > 0 or torch.isinf(model.parallel_synapse.scaler.data).sum() > 0:
+                    print('nan or inf in parallel synapse scaler')
+            
+            if model_type == 'parallel' and i % 50 == 0:
+                with torch.no_grad():
+                    # compute time to get_threshold_pool
+                    # start = datetime.datetime.now()
+                    threshold_pool, hidden_range = get_threshold_pool(model, testloader, device = device)
+                    # print(f'        Elapsed time to get threshold pool: {datetime.datetime.now() - start}')
+                    # slope_thres = 0.1
+                    # ampli_thres = 0.2
+                    # for each set of parallel synapses, if all slopes or amplitudes are smaller than slope_thres, change sign of scaler
+                    
+                    
+                    # mask1 = (model.parallel_synapse.slope.data < slope_thres) 
+                    # model.parallel_synapse.slope.data = torch.clamp(model.parallel_synapse.slope.data, min = slope_thres)  
+                    
+                    
+                    # mask2 = (model.parallel_synapse.ampli.data**2 < ampli_thres) 
+                    # model.parallel_synapse.ampli.data[mask2] = torch.sqrt(torch.Tensor([ampli_thres]).to(device)) 
+                    
+                    # model.parallel_synapse.thres.data[(mask1 + mask2).bool()] = threshold_pool[(mask1 + mask2).bool()]
+                    
+                    # mask_s = (mask1.sum(dim = 0) > model.n_synapse-1) + (mask2.sum(dim = 0) > model.n_synapse-1)
+                    # mask_s = mask_s.bool()
+                    # model.parallel_synapse.scaler.data[ mask_s] = - model.parallel_synapse.scaler.data[mask_s] 
+                    
+                    # clamp threshold of each hidden unit to be in the range of hidden_range
+                    for i_hidden in range(model.hidden_dim):
+                        model.parallel_synapse.thres.data[:, i_hidden, :] = torch.clamp(model.parallel_synapse.thres.data[:, i_hidden, :], min = hidden_range[0, i_hidden], max = hidden_range[1, i_hidden])
+
         
         losses.append(running_loss / len(trainloader))
         
@@ -269,10 +340,11 @@ if __name__ == '__main__':
     lr_thres = float(sys.argv[8])
     lr_slope = float(sys.argv[9])
     lr_ampli = float(sys.argv[10])
-    
-    use_scheduler = (sys.argv[11] == 'True')
-    decrease_epoch = int(sys.argv[12])
-    decrease_factor = float(sys.argv[13])
+    lr_scaler = float(sys.argv[11])
+    lr = float(sys.argv[12])
+    use_scheduler = (sys.argv[13] == 'True')
+    decrease_epoch = int(sys.argv[14])
+    decrease_factor = float(sys.argv[15])
     assert model_type in ['parallel', '2nn']
     assert loss_type in ['nll', 'hinge'] 
     
@@ -291,16 +363,18 @@ if __name__ == '__main__':
     
     results = []
     if model_type == 'parallel':
-        file_name = './results_'+dataset+f'/{model_type}_{loss_type}_H{hidden_dim}_M{n_synapse}_bias{bias}_range{hidden_range[1]}_lr_thres{lr_thres}_lr_ampli{lr_ampli}_lr_slope{lr_slope}_scheduler{use_scheduler}_decrease_{decrease_epoch}_epoch_factor_{decrease_factor}_initialization_v4.pkl'  
+        file_name = './results_'+dataset+f'/{model_type}_{loss_type}_H{hidden_dim}_M{n_synapse}_bias{bias}_range{hidden_range[1]}_lr_thres{lr_thres}_lr_ampli{lr_ampli}_lr_slope{lr_slope}_lr_scaler{lr_scaler}_lr{lr}_scheduler{use_scheduler}_decrease_{decrease_epoch}_epoch_factor_{decrease_factor}_initialization_v4.pkl'  
     else:
-        file_name = './results_'+dataset+f'/{model_type}_{loss_type}_H{hidden_dim}_scheduler{use_scheduler}_decrease_{decrease_epoch}_epoch_factor_{decrease_factor}.pkl'
-    try:
-        with open(file_name, 'rb') as f:
-            results = pickle.load(f)
-        i_start = len(results)
-    except:
-        i_start = 0
+        file_name = './results_'+dataset+f'/{model_type}_{loss_type}_H{hidden_dim}_bias{bias}_scheduler{use_scheduler}_decrease_{decrease_epoch}_epoch_factor_{decrease_factor}.pkl'
+    # try:
+    #     with open(file_name, 'rb') as f:
+    #         results = pickle.load(f)
+    #     i_start = len(results)
+    # except:
+    #     i_start = 0
     # calculate time for training
+    print(file_name.replace('_', ' '))
+    i_start = 0
     start = datetime.datetime.now()
     
     for i in range(i_start, n_Seed):
@@ -320,7 +394,7 @@ if __name__ == '__main__':
                                     additive_bias = bias)
             
         elif model_type == '2nn':
-            model = TwoLayerNN(input_dim=input_dim, hidden_dim = hidden_dim)
+            model = TwoLayerNN(input_dim=input_dim, hidden_dim = hidden_dim, additive_bias = bias)
         
         with open(file_name, 'wb') as f:
             pickle.dump(results, f)
@@ -335,9 +409,11 @@ if __name__ == '__main__':
                             model_type=model_type,
                             loss_type=loss_type,
                             use_scheduler=use_scheduler,
+                            lr = lr,
                             lr_ampli=lr_ampli,
                             lr_slope=lr_slope,
                             lr_thres=lr_thres,
+                            lr_scaler = lr_scaler,
                             decrease_epoch = decrease_epoch, 
                             decrease_factor = decrease_factor))
         

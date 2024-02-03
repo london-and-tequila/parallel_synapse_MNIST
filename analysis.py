@@ -15,7 +15,7 @@ def get_acc(result) -> np.ndarray:
     '''
     acc = []
     for i in range(len(result)):
-        acc.append(result[i]['accuracy'])
+        acc.append(result[i]['accuracy'][:101])
     return np.array(acc)
 
 def get_loss(results):
@@ -24,7 +24,7 @@ def get_loss(results):
     '''
     loss = []
     for result in results:
-        loss.append(result['loss'])
+        loss.append(result['loss'][:101])
         
     return np.array(loss)
 
