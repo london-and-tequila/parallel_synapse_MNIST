@@ -47,7 +47,6 @@ The main components can be used as follows:
 3. Analyze results using functions in `analysis.py`
 4. View comprehensive results and plots in `plot_results.ipynb`
 
-## Requirements
+## Contacts
 
-See requirements.txt for full dependencies.
-
+For questions or additional information, please contact: yus027@ucsd.edu
